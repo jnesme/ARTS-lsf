@@ -1,0 +1,39 @@
+# Large, regenerable reference data (downloadable from ZiemertLab, not versioned here)
+reference/actinobacteria/
+reference/alphaproteobacteria/
+reference/bacteroidetes/
+reference/betaproteobacteria/
+reference/chlamydiae/
+reference/cyanobacteria/
+reference/deinococcus-thermus/
+reference/delta_epsilon-proteobacteria/
+reference/firmicutes/
+reference/fusobacteria/
+reference/gammaproteobacteria/
+reference/hmm_models/
+reference/metagenome/
+reference/spirochaetes/
+reference/tenericutes/
+all_references.zip
+
+# Alternate/experimental reference groups (also large, regenerable)
+group1/
+group2/
+group3/
+verrucomicrobia/
+
+# Root-level HMM/model files bundled with reference/hmm_models.zip
+/barnap_bact_rRna.hmm
+/dufmodels.hmm
+/knownresistance.hmm
+/model_metadata.tsv
+
+# Prior ad hoc test run output (not source)
+test_Vibrio/
+
+# LSF job logs (run output, not source)
+lsf/logs/
+
+# Python bytecode cache
+__pycache__/
+*.pyc
