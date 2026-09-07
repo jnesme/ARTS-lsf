@@ -301,6 +301,20 @@ antiSMASH. Remote convention: `origin` points at this fork (push target), `upstr
    on lowercase ones (confirmed via direct testing: uppercase `N` and any-case `acgt` are fine,
    only lowercase ambiguity codes trigger it). Sequence lines are now uppercased immediately after
    MAFFT writes its output, before TrimAl reads it.
+3. **Silent worker-exception swallowing in parallel tree building.** With `-cpu > 1`,
+   `startquery()` dispatches `buildtrees()` across a `multiprocessing.Pool` via `apply_async()`
+   without ever collecting the results. Any exception raised inside a worker process (as opposed
+   to `buildtrees()`'s own handled False-return path, which *is* logged as `"BuildTree Failed"`)
+   was silently discarded — the pool finishes, the pipeline exits 0, and the affected marker's
+   core gene tree is simply missing with zero trace anywhere in the log. Confirmed as a real gap
+   with a standalone reproduction of the same dispatch pattern. Fixed by collecting each
+   `(marker, AsyncResult)` pair and calling `.get()` on every one after `pool.join()`, logging any
+   exception with the marker name attached, plus an explicit
+   `"Tree building summary: X/Y markers succeeded"` log line (both the parallel and sequential
+   code paths) so a shortfall is always visible rather than requiring a manual file-count
+   cross-check. Neither smoke-test run (S0204, S1608) actually hit this — `coregenes/*.fna`
+   counts matched `BuildTree`-finished counts exactly in both — so this is a forward-looking
+   robustness fix for future (especially long, unattended batch-scale) runs.
 
 ## Known unfixed issue (not hit by this fork's usage, documented for awareness)
 
