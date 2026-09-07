@@ -274,9 +274,21 @@ antiSMASH. Remote convention: `origin` points at this fork (push target), `upstr
 ## Added tooling
 
 - `lsf/setup.sh`, `lsf/submit_vibrio_only.sh`, `lsf/submit_pseudoalteromonas_only.sh`,
-  `lsf/submit_merged.sh` — bsub submission scripts for a per-genome ARTS smoke test on the `hpc`
-  queue, feeding antiSMASH `.gbk` output directly into `artspipeline1.py` (no `-ras`/antiSMASH
-  re-run).
+  `lsf/submit_merged.sh` — bsub submission scripts for the original 2-genome ARTS smoke test on
+  the `hpc` queue, feeding antiSMASH `.gbk` output directly into `artspipeline1.py` (no
+  `-ras`/antiSMASH re-run). `submit_merged.sh` is kept only as a reference example — its native
+  2-genome run is provably redundant with running the two solo scripts and combining afterward
+  (see `combine_smoketest_results.py` below), so it should not normally be resubmitted.
+- `lsf/submit_one_genome.sh` — the generic, reusable per-genome submission template (`<STRAIN>
+  <GBK_PATH> <PHYLUM> <RESULTDIR>`), used for batch-scale runs going forward. **`PHYLUM` is a
+  mandatory, validated argument, never defaulted**: ARTS's core-gene comparison is phylum-specific
+  (marker HMMs + gene matrix built per phylum reference set), and running a genome against the
+  wrong phylum's refdir produces no error — just silently meaningless results. The script checks
+  `reference/<phylum>/` actually exists and is complete (`coremodels.hmm`/`genematrix.txt`/
+  `model_metadata.json` present), printing the list of valid phyla and exiting 1 on any mismatch.
+  This matters concretely for Galathea3: the `pseudoalteromonas_seq` collection is taxonomically
+  mixed (most strains Gammaproteobacteria, but ~48/143 are Alphaproteobacteria — Tritonibacter/
+  Paracoccus/Loktanella), so phylum can never be safely assumed from source directory alone.
 - `lsf/combine_smoketest_results.py` — combines independently-completed single-genome ARTS
   result directories into the same `combined_core_table`/`combined_known_table`/
   `combined_dup_table`/`summary_table` outputs that ARTS's own native multi-genome mode would
@@ -306,15 +318,63 @@ antiSMASH. Remote convention: `origin` points at this fork (push target), `upstr
    without ever collecting the results. Any exception raised inside a worker process (as opposed
    to `buildtrees()`'s own handled False-return path, which *is* logged as `"BuildTree Failed"`)
    was silently discarded — the pool finishes, the pipeline exits 0, and the affected marker's
-   core gene tree is simply missing with zero trace anywhere in the log. Confirmed as a real gap
-   with a standalone reproduction of the same dispatch pattern. Fixed by collecting each
+   core gene tree is simply missing with zero trace anywhere in the log. Fixed by collecting each
    `(marker, AsyncResult)` pair and calling `.get()` on every one after `pool.join()`, logging any
    exception with the marker name attached, plus an explicit
    `"Tree building summary: X/Y markers succeeded"` log line (both the parallel and sequential
    code paths) so a shortfall is always visible rather than requiring a manual file-count
-   cross-check. Neither smoke-test run (S0204, S1608) actually hit this — `coregenes/*.fna`
-   counts matched `BuildTree`-finished counts exactly in both — so this is a forward-looking
-   robustness fix for future (especially long, unattended batch-scale) runs.
+   cross-check.
+
+   Verified three ways: (a) neither original smoke-test run (S0204, S1608) actually hit this —
+   `coregenes/*.fna` counts matched `BuildTree`-finished counts exactly in both; (b) a
+   fault-injection test against this real (unmodified) `buildtrees()` — 3 genuine markers
+   processed normally via real mafft/trimal/raxml calls, alongside one marker wired through a
+   wrapper that deliberately raises — confirmed the exception is caught, logged with the correct
+   marker name and full traceback, and correctly excluded from the success count (`3/4`, not a
+   silently-wrong `4/4`); (c) a 10-genome heavier batch test (5 Vibrio + 5 species-diverse
+   Pseudoalteromonas strains, run as independent LSF jobs) produced zero worker exceptions across
+   ~900 real marker-tree builds, alongside the same expected ~20-25-per-genome benign
+   coverage-threshold filter messages (see below) seen in the original two genomes.
+
+## Expected (benign) log messages — not bugs
+
+`extractdbgenes.py`'s initial HMM search uses a deliberately loose e-value cutoff (`evalue<=0.1`)
+so it doesn't miss weakly-scoring true orthologs, then applies a stricter coverage check
+(`genecov>=0.5` or `hmmcov>=0.5`) before accepting a hit as usable in the core-gene alignment. Any
+marker whose only hits fail *both* coverage checks gets its placeholder file removed, logged as:
+
+```
+INFO - extractdbgenes - None found passing coverage thresholds in potential core: <marker>
+```
+
+This is expected, not an error — typically caused by gene fragments truncated at contig edges,
+pseudogenes, or divergent paralogs that only weakly cross-hit a profile. Consistently seen at
+~20-25 markers per genome (out of ~580-600 initial candidates) across every genome tested in this
+fork's smoke test and heavier-batch test, including the same specific marker names recurring
+across independent Vibrio genomes (e.g. `TIGR00399`, `TIGR00706`, `TIGR01954` were filtered in
+both S0204 and S0276) — reflecting a stable property of specific reference profiles' fit to a
+given genus, not a per-genome anomaly. `summary_table.tsv`'s "Core Genes" count (from
+`combine_results.py`) reflects the pre-filter candidate count, not the post-filter
+`coretable.tsv` row count — the two are expected to differ by roughly this amount.
+
+## Interpreting the combined tables
+
+Two things worth knowing before prioritizing hits from `combined_core_table.tsv`/
+`combined_known_table.tsv` (native or via `combine_smoketest_results.py`):
+
+- **`combined_core_table.tsv`'s per-gene fraction columns (Duplication/BGC_Proximity/Phylogeny/
+  Known_target) divide by the total organism count in the run, not by how many organisms actually
+  have that gene.** A gene found in only 1 of N genomes with a "Yes" flag there shows the same
+  fraction as a gene found in all N genomes with only 1 "Yes" — very different signals, identical
+  number. Compare `len(Dup_orgs)`/`len(Phyl_orgs)`/etc. against `len(Core_orgs)` (the per-row
+  organism-lists also provided) rather than trusting the fraction column alone, especially at
+  larger sample sizes where this dilution effect grows.
+- **`combined_known_table.tsv`/`combined_dup_table.tsv` row counts are not directly comparable to
+  `summary_table.tsv`'s raw per-genome counts.** `combine_known_results()` intentionally collapses
+  multiple paralog hits against the same resistance-gene model within one organism to a single
+  organism-presence flag before merging across organisms — so its row count can be *smaller* than
+  either individual genome's raw `knownhits.tsv` row count. This is correct, organism-presence
+  semantics, just different from `combined_core_table.tsv`'s per-gene-fraction approach.
 
 ## Known unfixed issue (not hit by this fork's usage, documented for awareness)
 
