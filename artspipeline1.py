@@ -617,7 +617,13 @@ def startquery(infile=None,refdir=None,td=None,rd=None,hmmdbs=None,rnahmm=None,c
             log.exception("exception")
     else:
         if infile.endswith(".gbk"):
-            makeantismashresults(aspath, os.path.realpath(infile), os.path.realpath(tdir + "antismash"))
+            # makeantismashresults() is commented out upstream (dead legacy code:
+            # regenerated an antiSMASH-3.0.5-style HTML webpage via an internal API
+            # that no longer exists in antiSMASH >=5), but this call site was left
+            # active, causing a NameError on any direct .gbk input without -ras.
+            # It has no effect on parsing (parsegbk.convertgenes() below reads
+            # infile directly), so skip it rather than regenerate a legacy report.
+            log.info("Skipping legacy antiSMASH HTML webpage regeneration for .gbk input (not required for core/known/dup table generation)")
         elif infile.endswith(".json"):
             infile = makeantismashresults_json(aspath, os.path.realpath(infile), os.path.realpath(tdir + "antismash"), mcpu)
 
