@@ -866,15 +866,31 @@ def startquery(infile=None,refdir=None,td=None,rd=None,hmmdbs=None,rnahmm=None,c
             else:
                 ### Build trees
                 flist = [os.path.split(x)[-1] for x in glob.glob(tdir+"coregenes/*.fna") if not x.endswith("_rRNA.fna") or x.endswith("RNA_16S_rRNA.fna")] #include 16s seqs
+                succeeded = 0
                 if mcpu > 1:
                     pool = mp.Pool(mcpu)
-                    for fname in flist:
-                        pool.apply_async(buildtrees, args=(refdir, tdir, fname))
+                    # Collect AsyncResult objects and call .get() on each below --
+                    # pool.apply_async() silently discards any exception raised
+                    # inside the worker process unless its result is retrieved;
+                    # without this, a worker crash for a given marker (as opposed
+                    # to buildtrees()'s own handled False-return path, which IS
+                    # logged as "BuildTree Failed") would drop that marker with
+                    # zero trace in the log.
+                    async_results = [(fname, pool.apply_async(buildtrees, args=(refdir, tdir, fname))) for fname in flist]
                     pool.close()
                     pool.join()
+                    for fname, ares in async_results:
+                        try:
+                            if ares.get():
+                                succeeded += 1
+                        except Exception as e:
+                            log.error("BuildTree: worker exception for %s: %s"%(fname, e))
+                            log.exception("exception")
                 else:
                     for fname in flist:
-                        buildtrees(refdir, tdir, fname)
+                        if buildtrees(refdir, tdir, fname):
+                            succeeded += 1
+                log.info("Tree building summary: %d/%d markers succeeded"%(succeeded, len(flist)))
 
             log.info("Milestone_3_complete")
 
