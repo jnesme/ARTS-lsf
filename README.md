@@ -261,3 +261,53 @@ Nucleic Acids Res.,[10.1093/nar/gkaa374](https://doi.org/10.1093/nar/gkaa374)
 Alanjary,M., Kronmiller,B., Adamek,M., Blin,K., Weber,T., Huson,D., Philmus,B. and Ziemert,N. (2017) The Antibiotic 
 Resistant Target Seeker (ARTS), an exploration engine for antibiotic cluster prioritization and novel drug target discovery. 
 Nucleic Acids Res.,[10.1093/nar/gkx360](https://doi.org/10.1093/nar/gkx360)
+
+# Fork notes (jnesme/ARTS-lsf)
+
+This fork (`git@github.com:jnesme/ARTS-lsf.git`) adds an LSF (DTU HPC) deployment of ARTS for
+analyzing the Galathea3 Vibrio/Pseudoalteromonas strain collections, reusing antiSMASH results
+already computed by an upstream bacass+funcscan Nextflow pipeline rather than re-running
+antiSMASH. Remote convention: `origin` points at this fork (push target), `upstream` points at
+[ZiemertLab/ARTS](https://github.com/ziemertlab/arts) (pull future upstream releases via
+`git fetch upstream && git merge upstream/master`).
+
+## Added tooling
+
+- `lsf/setup.sh`, `lsf/submit_vibrio_only.sh`, `lsf/submit_pseudoalteromonas_only.sh`,
+  `lsf/submit_merged.sh` — bsub submission scripts for a per-genome ARTS smoke test on the `hpc`
+  queue, feeding antiSMASH `.gbk` output directly into `artspipeline1.py` (no `-ras`/antiSMASH
+  re-run).
+- `lsf/combine_smoketest_results.py` — combines independently-completed single-genome ARTS
+  result directories into the same `combined_core_table`/`combined_known_table`/
+  `combined_dup_table`/`summary_table` outputs that ARTS's own native multi-genome mode would
+  produce. This works because ARTS's multi-genome branch runs every genome through `startquery()`
+  completely independently (same static `refdir`, no cross-genome state) and only combines
+  already-written per-genome tables at the end — so running genomes as separate jobs and
+  combining them afterward reproduces identical results without redundantly repeating each
+  genome's expensive MAFFT/TrimAl/RAxML analysis inside one long-running multi-genome job.
+
+## Bug fixes made in this fork
+
+1. **`NameError: makeantismashresults` on any direct `.gbk` input.** `artspipeline1.py`'s
+   non-`-ras` code path unconditionally called `makeantismashresults()` for `.gbk` input, but
+   that function is commented out upstream while the call site was left active — crashing
+   instantly on exactly the "I already have antiSMASH results" usage this README documents. The
+   dead function only ever regenerated a legacy antiSMASH-3.0.5-style HTML page via an internal
+   API that no longer exists in antiSMASH ≥5, so the call is now skipped rather than restored.
+2. **TrimAl errors on lowercase ambiguity characters MAFFT inserts via `--add`.** When adding a
+   new query sequence to a reference alignment, MAFFT can fill newly-created columns in the
+   *reference* sequences with a lowercase ambiguity character (e.g. `n`) where it has no data.
+   TrimAl's `-automated1` scoring matrix only recognizes uppercase symbols and errors repeatedly
+   on lowercase ones (confirmed via direct testing: uppercase `N` and any-case `acgt` are fine,
+   only lowercase ambiguity codes trigger it). Sequence lines are now uppercased immediately after
+   MAFFT writes its output, before TrimAl reads it.
+
+## Known unfixed issue (not hit by this fork's usage, documented for awareness)
+
+`combine_results.py`'s `generate_plots()` is called *unguarded* by `artspipeline1.py`'s native
+multi-genome mode, but unconditionally opens `combined_bgc_table.tsv` — a file only created by
+`combine_bigscape_results()`, which only runs when ARTS is invoked with `-rbsc`/BiG-SCAPE. A
+native multi-genome ARTS run without `-rbsc` will therefore crash at this final step (after all
+the actually-useful combined tables have already been written). `parse_json()` has the same
+unconditional dependency but is at least wrapped in a try/except upstream. Neither function is
+called by `lsf/combine_smoketest_results.py` in this fork.
