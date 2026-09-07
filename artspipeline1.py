@@ -67,6 +67,18 @@ def mergealign(refalgn,newseqs,outfile,cpu=1):
         # ofil = tempfile.NamedTemporaryFile(dir=os.path.split(newseqs)[0])
         with open(outfile,"w") as ofil:
             subprocess.call(cmd,stdout=ofil)
+        # MAFFT --add can fill newly-created alignment columns in the existing
+        # (reference) sequences with lowercase ambiguity characters (e.g. 'n')
+        # where it has no data for them. TrimAl's -automated1 scoring matrix
+        # only recognizes uppercase symbols and errors on lowercase ones
+        # ("the symbol 'n' accesing the matrix is not defined in this object"),
+        # so normalize sequence lines to uppercase before TrimAl ever sees them
+        # (headers left untouched).
+        with open(outfile,"r") as ofil:
+            alignedlines = ofil.readlines()
+        with open(outfile,"w") as ofil:
+            for line in alignedlines:
+                ofil.write(line if line.startswith(">") else line.upper())
         log.debug("MAFFT: finished %s"%newseqs)
         return True
     except subprocess.CalledProcessError as e:
