@@ -91,7 +91,16 @@ def parse_genome_hits(arts_query_log):
             if not m:
                 continue
             kind, n, genes_repr = m.groups()
-            genes = ast.literal_eval(genes_repr)
+            try:
+                genes = ast.literal_eval(genes_repr)
+            except (ValueError, SyntaxError):
+                # Reading a log file that a still-running genome is actively
+                # appending to can catch a line mid-flush -- rare but real,
+                # confirmed once against a live batch. Treat as "not this
+                # line" rather than crashing the whole report; the next run
+                # (this script is meant to be re-run repeatedly against a
+                # live batch) will see the completed line instead.
+                continue
             if kind == "two":
                 two_plus_n, two_plus_genes, complete = int(n), genes, True
             else:
