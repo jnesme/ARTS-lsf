@@ -452,12 +452,14 @@ Two things worth knowing before prioritizing hits from `combined_core_table.tsv`
 ARTS's premise (see its own README intro): a housekeeping gene sitting next to a BGC, especially
 if it's also duplicated and/or phylogenetically discordant from the species tree, is a strong
 self-resistance-gene candidate — and a strong hint about the BGC's product's mechanism of action.
-Four independent lines of evidence feed this, one per `coretable.tsv` column: **Duplication**,
-**BGC_Proximity**, **Phylogeny** (HGT/discordance), and **Known_target** (direct homology to a
-characterized resistance gene). A gene flagged on multiple axes is a much stronger candidate than
-one flagged on proximity alone.
+**The flagged marker genes are ordinary housekeeping gene families (e.g. `ackA` acetate kinase,
+`ribB` riboflavin biosynthesis, `sigpep_I_bact` signal peptidase) — not resistance genes by
+name.** They're candidates *because of where/how they appear* (duplicated, BGC-adjacent,
+phylogenetically odd), not because the gene itself is known to confer resistance. (One partial
+exception seen in practice: `TIGR00710`/`efflux_Bcr_CflA` is itself TIGRFAM-classified as a
+drug-resistance transporter family, making it a more directly compelling hit than the others.)
 
-### The built-in per-genome shortlist
+### The built-in per-genome shortlist — and what it actually scores
 
 ARTS already computes a composite score for you — no extra tooling needed for this part. Every
 completed genome's `arts-query.log` (and, once combined, `summary_table.tsv`'s `2+`/`3+` columns)
@@ -468,10 +470,23 @@ INFO - artspipeline1 - Hits with two or more criteria: 16 : {'TIGR01534', 'TIGR0
 INFO - artspipeline1 - Hits with three or more criteria: 0 : set()
 ```
 
-(real output from strain F3329, this fork's first Alphaproteobacteria run) — a genome-specific
-shortlist of marker gene IDs already flagged on ≥2 of the four criteria simultaneously, with the
-actual TIGR/Pfam IDs named directly. This is the fastest way to see whether a given genome has
-anything interesting at all, before looking at any combined table.
+(real output from strain F3329, this fork's first Alphaproteobacteria run). **This composite only
+combines three of the four `coretable.tsv` columns: Duplication, BGC_Proximity, and Phylogeny**
+(`artspipeline1.py:958-967` — `twoplus`/`threeplus` are set intersections over exactly
+`rslt["phylogeny"]`, `rslt["proximity"]`, `rslt["duplicates"]`). **`Known_target` (homology to a
+characterized resistance/target gene family) is a separate, independent screen and never
+contributes to this score.** Confirmed on real data: `TIGR01534` (GAPDH-I) had
+Duplication=Yes/Phylogeny=Yes/Known_target=Yes but BGC_Proximity=No — it landed in the `2+` set
+(duplicates∩phylogeny) but never the `3+` set, which strictly requires all of
+phylogeny∩proximity∩duplicates together, Known_target regardless. Don't assume "3+" means "hit
+on any 3 of the 4 columns" — check which 3 specifically.
+
+ARTS's "Known Resistance Hits" (`knownhits.tsv`) is worth checking independently of the `2+`/
+`3+` score, not as a component of it — it's matched against ARTS's own curated database of gene
+families *documented elsewhere in the literature as natural-product targets* (e.g. DNA gyrase B
+as the known target of aminocoumarins), not a general clinical AMR-surveillance database like
+CARD/ResFinder — don't expect to see classic named resistance genes (`vanA`, `tetM`, `blaTEM`)
+here.
 
 ### Batch workflow
 
