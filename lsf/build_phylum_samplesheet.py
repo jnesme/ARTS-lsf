@@ -176,8 +176,12 @@ def main():
             duplicate_strains_dropped.append((r[0], r[1]))
     rows = deduped_rows
 
+    # csv.writer defaults to CRLF line terminators (per the CSV spec) --
+    # explicitly force '\n' instead, since the batch-array driver reads this
+    # file with plain shell tools (sed/cut), which don't strip '\r', leaving
+    # a trailing carriage return on the last field of every row otherwise.
     with open(OUTPUT_CSV, "w", newline="") as fh:
-        writer = csv.writer(fh)
+        writer = csv.writer(fh, lineterminator="\n")
         writer.writerow(["collection", "strain", "phylum_refdir", "taxonomy_source", "gbk_path"])
         writer.writerows(rows)
 

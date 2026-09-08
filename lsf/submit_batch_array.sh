@@ -34,8 +34,10 @@ if [ -z "${LSB_JOBINDEX:-}" ]; then
     exit 1
 fi
 
-# CSV row 1 (after header) corresponds to array index 1.
-ROW=$(tail -n +2 "${CSV}" | sed -n "${LSB_JOBINDEX}p")
+# CSV row 1 (after header) corresponds to array index 1. tr -d '\r' guards
+# against CRLF line endings (or any other stray CR) leaving an invisible
+# trailing carriage return on the last extracted field.
+ROW=$(tail -n +2 "${CSV}" | sed -n "${LSB_JOBINDEX}p" | tr -d '\r')
 if [ -z "${ROW}" ]; then
     echo "ERROR: no CSV row for job index ${LSB_JOBINDEX} (CSV has $(tail -n +2 "${CSV}" | wc -l) data rows)."
     exit 1
