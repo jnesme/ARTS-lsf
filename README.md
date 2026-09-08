@@ -297,6 +297,33 @@ antiSMASH. Remote convention: `origin` points at this fork (push target), `upstr
   already-written per-genome tables at the end — so running genomes as separate jobs and
   combining them afterward reproduces identical results without redundantly repeating each
   genome's expensive MAFFT/TrimAl/RAxML analysis inside one long-running multi-genome job.
+- `lsf/build_phylum_samplesheet.py` — builds the `strain,phylum,gbk_path` samplesheet
+  `submit_batch_array.sh` (below) consumes, sourced from KmerFinder taxonomy
+  (`kmerfinder_summary.csv`, from the sibling `bacass` repo — ARTS itself never uses/reports
+  phylum, it's purely an external, pre-invocation choice of which `reference/<phylum>/` set to
+  run a genome against). Reduces each genome's semicolon-delimited `Taxonomy` lineage string to
+  the class-level token ARTS's reference sets actually use for Proteobacteria
+  (alphaproteobacteria/betaproteobacteria/gammaproteobacteria/delta_epsilon-proteobacteria), or
+  the phylum-level token directly for every other phylum. Validates every row against what's
+  actually on disk (both the `reference/<phylum>/` set and the antiSMASH `.gbk` file) rather than
+  assuming, and includes a documented fallback (cross-checked against
+  `PRJNA242743_AssemblyDetails.txt`) for the handful of samples KmerFinder fails to classify.
+  Also detects and resolves strain-ID collisions across collections (confirmed cases: the same
+  physical strain assembled twice via two different pipelines, one raw-reads/bacass, one
+  pre-assembled/NCBI-sourced — kept per a fixed collection-preference order, never silently
+  double-counted).
+- `lsf/submit_batch_array.sh` — the full-batch LSF job-array driver. One array task per
+  samplesheet row (looked up via `$LSB_JOBINDEX`), delegating to `submit_one_genome.sh` for the
+  actual phylum-validated ARTS invocation. Submit with `bsub < submit_batch_array.sh`; the
+  `[1-N]%20` array spec throttles concurrency to be considerate of the shared `hpc` queue (the
+  array size `N` must match the samplesheet's row count — update both together if regenerated).
+- `lsf/combine_batch_results.py <phylum>` — the batch-scale generalization of
+  `combine_smoketest_results.py`: reads the samplesheet, finds every genome for the given phylum
+  that has actually completed (non-empty `tables/coretable.tsv`), reports which genomes are
+  skipped and why (not yet submitted vs. still running), and combines only the completed ones.
+  Safe to re-run at any point while the batch is still in progress — it just combines whatever
+  has finished so far. **Run once per phylum group, never combining across phyla** (see
+  "Using ARTS output at batch scale" below).
 
 ## Bug fixes made in this fork
 
@@ -335,6 +362,25 @@ antiSMASH. Remote convention: `origin` points at this fork (push target), `upstr
    Pseudoalteromonas strains, run as independent LSF jobs) produced zero worker exceptions across
    ~900 real marker-tree builds, alongside the same expected ~20-25-per-genome benign
    coverage-threshold filter messages (see below) seen in the original two genomes.
+
+## Incidents in this fork's own batch tooling (not ARTS bugs)
+
+**CRLF line endings silently broke every file-existence check in the first full-batch launch.**
+The first 438-genome `submit_batch_array.sh` run failed 438/438 within seconds, every task
+reporting `Input GenBank file not found` for a file that demonstrably existed. Root cause:
+Python's `csv.writer` defaults to `\r\n` line terminators (per the CSV spec), so
+`build_phylum_samplesheet.py`'s output had every row's last field (`gbk_path`) carrying an
+invisible trailing carriage return once read back with plain shell `sed`/`cut` in
+`submit_batch_array.sh` — the compared path string never matched a real file on disk. Confirmed
+this wasn't a filesystem/symlink issue first: both collections failed identically, including
+`pseudoalteromonas_seq`'s non-symlinked real files, which ruled that out immediately. Fixed at the
+source (`csv.writer(fh, lineterminator="\n")`) and defensively in the array script (`tr -d '\r'`
+on the extracted row, so a future hand-edited or differently-generated CSV can't reintroduce
+this), then verified with a local `LSB_JOBINDEX=1` dry run reaching the real ARTS invocation
+banner, and confirmed for real via a 3-genome small-scale test spanning both collections and both
+phyla before relaunching the full batch. No compute was wasted — each failure took ~5 seconds
+before any ARTS analysis started, and no result directories were left behind (the file-existence
+check runs before `mkdir -p` in `submit_one_genome.sh`).
 
 ## Expected (benign) log messages — not bugs
 
@@ -375,6 +421,61 @@ Two things worth knowing before prioritizing hits from `combined_core_table.tsv`
   organism-presence flag before merging across organisms — so its row count can be *smaller* than
   either individual genome's raw `knownhits.tsv` row count. This is correct, organism-presence
   semantics, just different from `combined_core_table.tsv`'s per-gene-fraction approach.
+
+## Using ARTS output at batch scale
+
+ARTS's premise (see its own README intro): a housekeeping gene sitting next to a BGC, especially
+if it's also duplicated and/or phylogenetically discordant from the species tree, is a strong
+self-resistance-gene candidate — and a strong hint about the BGC's product's mechanism of action.
+Four independent lines of evidence feed this, one per `coretable.tsv` column: **Duplication**,
+**BGC_Proximity**, **Phylogeny** (HGT/discordance), and **Known_target** (direct homology to a
+characterized resistance gene). A gene flagged on multiple axes is a much stronger candidate than
+one flagged on proximity alone.
+
+### The built-in per-genome shortlist
+
+ARTS already computes a composite score for you — no extra tooling needed for this part. Every
+completed genome's `arts-query.log` (and, once combined, `summary_table.tsv`'s `2+`/`3+` columns)
+contains lines like:
+
+```
+INFO - artspipeline1 - Hits with two or more criteria: 16 : {'TIGR01534', 'TIGR01892', ...}
+INFO - artspipeline1 - Hits with three or more criteria: 0 : set()
+```
+
+(real output from strain F3329, this fork's first Alphaproteobacteria run) — a genome-specific
+shortlist of marker gene IDs already flagged on ≥2 of the four criteria simultaneously, with the
+actual TIGR/Pfam IDs named directly. This is the fastest way to see whether a given genome has
+anything interesting at all, before looking at any combined table.
+
+### Batch workflow
+
+1. **Combine per phylum group, separately.** Once genomes in one phylum group have (at least
+   partially) completed, run:
+   ```
+   python lsf/combine_batch_results.py gammaproteobacteria
+   python lsf/combine_batch_results.py alphaproteobacteria
+   ```
+   Each run reports which genomes it included vs. skipped (not yet submitted, or still running)
+   and is safe to re-run at any point — it just combines whatever has finished so far. **Never**
+   combine across phyla: ARTS's core-gene comparison is refdir-specific (different marker
+   HMMs/gene matrix per phylum), so a Gammaproteobacteria genome and an Alphaproteobacteria genome
+   are not comparable in one combined table, and combining them would silently produce
+   meaningless results — the same underlying principle as `submit_one_genome.sh`'s mandatory
+   phylum validation (above): ARTS never checks this for you, so combining across phyla is just
+   as silently wrong as running a genome against the wrong `refdir` in the first place.
+2. **Triage strains first, not genes.** Sort the combined `summary_table.tsv` by `3+` then `2+`
+   descending. This immediately surfaces which *strains* across the whole collection carry the
+   richest self-resistance signal, before drilling into any specific gene or BGC.
+3. **Drill into a promising strain's own `bgctable.tsv`** to map its `2+`/`3+`-flagged gene IDs
+   back to the actual BGC region and predicted product they sit next to.
+4. **Cross-check recurrence in `combined_core_table.tsv`.** Does the same gene show up flagged in
+   other strains too? Compare `len(Dup_orgs)`/`len(Phyl_orgs)`/etc. against `len(Core_orgs)` for
+   that row (see "Interpreting the combined tables" above for why the raw fraction column
+   shouldn't be trusted directly) — a gene independently flagged across multiple, phylogenetically
+   distinct strains is a far stronger, population-validated candidate than a single-genome hit,
+   and is precisely the kind of signal that running many genomes together (rather than one at a
+   time) is meant to surface.
 
 ## Known unfixed issue (not hit by this fork's usage, documented for awareness)
 
