@@ -38,6 +38,16 @@ BATCH_RESULTS_BASE = "/work3/josne/Projects/Vibrio_Galathea3/arts_results/batch"
 COMBINED_OUTPUT_BASE = "/work3/josne/Projects/Vibrio_Galathea3/arts_results/batch_combined"
 
 
+def _log_contains(path, needle):
+    if not os.path.isfile(path):
+        return False
+    with open(path) as fh:
+        for line in fh:
+            if needle in line:
+                return True
+    return False
+
+
 def main():
     if len(sys.argv) != 2:
         sys.exit("Usage: %s <phylum_refdir>  (e.g. gammaproteobacteria, alphaproteobacteria)" % sys.argv[0])
@@ -56,11 +66,26 @@ def main():
             gbk_path = row["gbk_path"]
             resultdir = os.path.join(BATCH_RESULTS_BASE, phylum, strain)
             coretable = os.path.join(resultdir, "tables", "coretable.tsv")
+            query_log = os.path.join(resultdir, "arts-query.log")
 
             if not os.path.isdir(resultdir):
                 missing_entirely.append(strain)
                 continue
             if not os.path.isfile(coretable) or os.path.getsize(coretable) == 0:
+                not_yet_done.append(strain)
+                continue
+            # writecoretable() is called TWICE: once early (before the
+            # phylogeny/RangerDTL step, with "N/A" placeholders in the
+            # Phylogeny column) and again at the very end with real data.
+            # A non-empty coretable.tsv alone doesn't distinguish these --
+            # confirmed on real batch data: coretable.tsv existing and
+            # non-empty is NOT sufficient, since combine_core_results()
+            # silently treats "N/A" as "No", corrupting the combined
+            # Phylogeny fraction/recurrence for any genome combined
+            # mid-run. "Hits with two or more criteria" is only logged
+            # after the second, final write, so use that as the true
+            # completion signal instead.
+            if not _log_contains(query_log, "Hits with two or more criteria"):
                 not_yet_done.append(strain)
                 continue
 

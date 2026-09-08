@@ -319,11 +319,22 @@ antiSMASH. Remote convention: `origin` points at this fork (push target), `upstr
   array size `N` must match the samplesheet's row count — update both together if regenerated).
 - `lsf/combine_batch_results.py <phylum>` — the batch-scale generalization of
   `combine_smoketest_results.py`: reads the samplesheet, finds every genome for the given phylum
-  that has actually completed (non-empty `tables/coretable.tsv`), reports which genomes are
-  skipped and why (not yet submitted vs. still running), and combines only the completed ones.
-  Safe to re-run at any point while the batch is still in progress — it just combines whatever
-  has finished so far. **Run once per phylum group, never combining across phyla** (see
-  "Using ARTS output at batch scale" below).
+  that has *truly* completed (see the completion-check pitfall documented below — a non-empty
+  `coretable.tsv` alone is not sufficient), reports which genomes are skipped and why (not yet
+  submitted vs. still running), and combines only the completed ones. Safe to re-run at any point
+  while the batch is still in progress — it just combines whatever has finished so far. **Run
+  once per phylum group, never combining across phyla** (see "Using ARTS output at batch scale"
+  below).
+- `lsf/triage_report.py` — the "easy way" batch triage report (flat TSV, one row per
+  flagged gene per genome): ranks every truly-completed genome by ARTS's own built-in
+  `2+`/`3+` composite score, and for every gene in a genome's own `2+` set, looks up its
+  cross-genome recurrence in that phylum's `combined_core_table.tsv`
+  (`recur_dup_n`/`recur_bgc_n`/`recur_phyl_n`/`recur_known_n` against `recur_core_n` — see
+  "Interpreting the combined tables"). Also tags each gene with a `criteria_tier` column (2 or 3)
+  since the `3+` set is a genuine subset of the `2+` set, not a separate list — conflating them
+  makes every `2+` gene look equally strong even though only the `3+` ones are the true
+  standouts. Does not yet resolve which specific BGC/product a flagged gene sits next to (needs
+  parsing `bgctable.tsv`'s nested `Genelist` string) — a natural "harder way" follow-up.
 
 ## Bug fixes made in this fork
 
@@ -381,6 +392,20 @@ banner, and confirmed for real via a 3-genome small-scale test spanning both col
 phyla before relaunching the full batch. No compute was wasted — each failure took ~5 seconds
 before any ARTS analysis started, and no result directories were left behind (the file-existence
 check runs before `mkdir -p` in `submit_one_genome.sh`).
+
+**A non-empty `coretable.tsv` does not mean a genome has finished.** `writecoretable()`
+(`artspipeline1.py`) is called *twice* per genome: once early, before the phylogeny/RangerDTL
+step, writing `N/A` placeholders into the `Phylogeny` column, and again at the very end with real
+data. `combine_batch_results.py`'s and `triage_report.py`'s first versions both checked only
+"`coretable.tsv` exists and is non-empty" as their completion signal — which the early write
+already satisfies. Worse, `combine_core_results()` silently treats `N/A` as `"No"`, so combining
+a still-running genome doesn't just include incomplete data, it *actively misrepresents* its
+phylogeny status as a confirmed negative in the combined table. Caught by direct inspection of
+real batch data: of 22 genomes whose `coretable.tsv` looked "done," only 2 actually were — the
+other 20 had 100% `N/A` in their `Phylogeny` column and were still mid-tree-building. Fixed in
+both scripts by requiring `"Hits with two or more criteria"` to appear in `arts-query.log`
+instead — that line is only written after the second, final `writecoretable()` call, making it
+the true completion signal for any run using `-opt ...,phyl`.
 
 ## Expected (benign) log messages — not bugs
 
