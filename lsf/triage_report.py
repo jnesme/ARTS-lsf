@@ -24,6 +24,22 @@ import csv
 import glob
 import os
 import re
+import sys
+
+# combined_core_table.tsv's [Hits_listed] column concatenates every sharing
+# organism's Genelist string -- for a widely-shared core gene this grows with
+# genome count and exceeds Python's default 128KB csv field limit once enough
+# genomes are combined (hit in practice at n=194; not at n=2/22/65). We never
+# read that column here (see load_combined_core_lookup), so it's safe to just
+# raise the limit rather than change what's parsed. sys.maxsize can overflow
+# the platform's C long for this call on some systems -- back off until it fits.
+_limit = sys.maxsize
+while True:
+    try:
+        csv.field_size_limit(_limit)
+        break
+    except OverflowError:
+        _limit = int(_limit / 10)
 
 BATCH_BASE = "/work3/josne/Projects/Vibrio_Galathea3/arts_results/batch"
 COMBINED_BASE = "/work3/josne/Projects/Vibrio_Galathea3/arts_results/batch_combined"
