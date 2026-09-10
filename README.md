@@ -517,6 +517,52 @@ here.
    and is precisely the kind of signal that running many genomes together (rather than one at a
    time) is meant to surface.
 
+### Raw flagged-gene count vs. distinct clusters — operons inflate the score
+
+The `2+`/`3+` counts above (and this fork's `triage_report.py`) count each flagged core gene
+independently. But flagged genes often come from the same multi-gene operon, and when several
+genes from one operon land next to the same BGC, the raw count treats them as that many
+independent lines of evidence when they're really one signal.
+
+**Confirmed on the full 438-genome batch: in every one of the top-10 strains by raw `3+` score,
+7–8 of the ~9–10 flagged genes are a single flagellar operon sitting next to one BGC** — either
+the rod/hook genes (`FlgB`/`FlgC`/`FlgF`/`FlgG`/`FlgK`/`flgL`/`FlgM`, in an arylpolyene-type BGC in
+7/10 strains) or the export-apparatus genes (`FliE`/`FliF`/`FlhB`/`FliP`/`FliR`/`FliQ`/`FliN`/
+`fliI_yscN`, in an NRP-metallophore/NRPS/T1PKS BGC in the other 3/10). Flagellar genes are
+routinely duplicated and phylogenetically discordant across bacteria (multiple flagellar systems,
+horizontal transfer, phase variation) for reasons having nothing to do with antibiotic
+self-resistance — so an operon like this can single-handedly put a strain at the top of the raw
+ranking. Confirmed via `bgctable.tsv`'s `Genelist` column (locus-level gene names + descriptions),
+not inferred from TIGRFAM IDs alone.
+
+This also sharpens (don't confuse with) the finding above about `TIGR00710`/`efflux_Bcr_CflA`:
+of the 10 top-raw-score strains, 7 do carry `TIGR00710` — but only at the **`2+` tier**, in a
+small, separate RiPP-like BGC cluster unrelated to the flagellar operon; **none of the 10 have
+`TIGR00710` in their `3+` tier specifically** (`3+` additionally requires BGC-proximity, and in
+these genomes the flagellar operon — not the efflux gene — is what satisfies that). So "does this
+strain have `TIGR00710`" and "is this strain's raw `3+` score high" are close to independent
+questions in this batch.
+
+`lsf/triage_report_by_cluster.py` re-ranks by **distinct flagged BGC clusters** instead of raw
+gene count, and separately flags whether *any* of a strain's flagged genes (checked at the `2+`
+tier, the superset) is resistance-plausible by the same keyword scan used in the funcscan
+cross-check below. Output:
+`/work3/josne/Projects/Vibrio_Galathea3/arts_results/triage_report_by_cluster.tsv`. Re-ranking
+the same batch this way produces a **completely different top strain** than the raw-count
+ranking: `S1609` (raw `3+`=9, but only from 8 *distinct* clusters, each usually a single gene —
+`TatD`-family hydrolase, catalase/peroxidase, a 2-gene flagellar fragment, methionine-sulfoxide
+reductase, DNA topoisomerase III, a T6SS component, etc. — genuinely independent signals, though
+none resistance-annotated), while the raw-count top strain (`S0575`) drops to rank 46 once its
+flagellar operon is collapsed to the one cluster it actually is.
+
+**Practical takeaway: prioritize by distinct clusters, not raw gene count**, and treat a strain's
+`has_resistance_annotated_gene` flag and its cluster-diversity score as two separate pieces of
+evidence to combine deliberately — most of the raw-count top-10 score high on gene count alone
+with a single operon behind most of it, while the batch's actual best strains by both measures at
+once are different names: `S2539_3` and `S4053` each carry `TIGR00710` *and* 7 distinct flagged
+clusters (vs. the batch max of 8, held by `S1609`, which has no resistance-annotated gene) — a
+substantially more convincing combination than anything in the raw-count top-10.
+
 ### Cross-checking ARTS's candidates against independent ARG calls (funcscan)
 
 The batch's genomes were also run through nf-core/funcscan, which calls antimicrobial resistance
