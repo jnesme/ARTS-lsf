@@ -570,18 +570,40 @@ without checking `BGC_Proximity` per gene.
 
 **External validation:** `S4053` was independently confirmed bioactive against *Klebsiella* in
 the lab (2026-09-10) — a real, wet-lab-positive hit from this batch, regardless of which specific
-ARTS-flagged signal (if any) explains it. Given the `TIGR00710` disconnect just described, the
-`TIGR00710` hit is *not* good evidence for which BGC in `S4053` produces the active compound. Its
-7 flagged clusters are: `NRP-metallophore,NRPS,T1PKS` (`cluster-1_1`) immediately adjacent to
-`NI-siderophore,ectoine` (`cluster-1_2`) on the same scaffold (412–508 kb, effectively one
-~95 kb locus — antiSMASH's cluster splitting can separate what is really one larger BGC),
-`T3PKS` (`cluster-2_1`), `azole-containing-RiPP` (`cluster-2_3`), `NRPS-like,arylpolyene`
-(`cluster-6_2`), `NRPS,T1PKS` (`cluster-6_3`), and `betalactone` (`cluster-10_1`, the one with the
-most core hits, 5). The adjacent siderophore/NRPS-T1PKS pair is the mechanistically most
-plausible candidate for anti-*Klebsiella* activity (siderophore-antibiotic "Trojan horse"
-conjugates are a well-documented strategy against Enterobacteriaceae, which take up iron
-aggressively) — but this is a hypothesis from BGC architecture alone, not something ARTS's core-
-gene screen itself singles out; it needs actual structural/knockout follow-up to confirm.
+ARTS-flagged signal (if any) explains it. Given the `TIGR00710` disconnect just described, that
+hit is *not* good evidence for which BGC in `S4053` produces the active compound; the actual
+candidate came from reading the antiSMASH domain annotations directly.
+
+`cluster-1_1` (`contig_1.region001.gbk`, `NRP-metallophore,NRPS,T1PKS`, 61.5 kb) has the specific
+gene architecture of the **yersiniabactin/micacocidin siderophore structural family**, not a
+generic NRPS: salicylate synthase + salicylate-AMP ligase (aryl-acid starter) → an NRPS with
+**3 Heterocyclization domains + an embedded methyltransferase domain** (cyclizes 2 Cys residues
+into thiazolines — matches yersiniabactin's HMWP2) → a PKS module (KS/AT/KR, malonyl-CoA
+extension, forming the gem-dimethyl thiazolidine ring) → a standalone Reductase (matches `YbtU`)
+→ Thioesterase release → a dedicated MFS efflux transporter + TonB-dependent receptor for
+re-uptake. (Pyochelin/anguibactin are simpler single-heterocycle siderophores with no PKS
+extension — the 3-heterocyclization-domain-plus-PKS combination specifically matches the
+yersiniabactin/micacocidin subclass.) This matters mechanistically: yersiniabactin has a
+documented **direct antibacterial effect independent of iron competition** — it binds copper and
+catalyzes ROS generation (Koh et al., *Cell Host & Microbe* 2017 and related work) — a specific,
+testable explanation for anti-*Klebsiella* activity, not just generic iron starvation.
+
+The immediately adjacent `cluster-1_2` (`contig_1.region002.gbk`, `NI-siderophore,ectoine`,
+scaffold_1:475183-507665) is a **separate, biosynthetically unrelated iron system**: a genuine
+**aerobactin operon** (`iucA`/`iucB`/`iucC`/`iucD`-type genes + `iutA` receptor) plus unrelated
+co-located ectoine biosynthesis. Aerobactin is itself the dominant siderophore driving
+hypervirulent *K. pneumoniae* — if anything this points to iron-piracy/nutritional competition as
+a plausible secondary mechanism, not the primary one.
+
+No KnownClusterBlast/MIBiG comparison was available in this antiSMASH run (funcscan's config
+apparently skipped that module) — the structural-family call above is from reading the NRPS/PKS
+domain fields (`aSDomain`/`specificity`) directly, not an automated database match. This is a
+hypothesis from domain architecture, not something ARTS's core-gene screen itself singles out (its
+own flagged gene here, `TIGR00710`, is a red herring, as established above) — actual confirmation
+needs a BLAST of the NRPS/PKS proteins against characterized Ybt/micacocidin sequences, or
+extracting/testing the region001 product directly. Lower-priority alternative: `cluster-10_1`
+(`betalactone`), the flagged cluster with the most core hits (5), not yet inspected at this level
+of detail.
 
 ### Cross-checking ARTS's candidates against independent ARG calls (funcscan)
 
