@@ -517,6 +517,64 @@ here.
    and is precisely the kind of signal that running many genomes together (rather than one at a
    time) is meant to surface.
 
+### Cross-checking ARTS's candidates against independent ARG calls (funcscan)
+
+The batch's genomes were also run through nf-core/funcscan, which calls antimicrobial resistance
+genes independently via five tools (AMRFinderPlus, RGI, DeepARG, fARGene, ABRicate) and combines
+them into one `hamronization_combined_report.tsv` per collection. This gives a way to check
+whether ARTS's flagged genes actually correspond to genes an AMR-specific caller would recognize
+as resistance genes — a check worth doing given how broad ARTS's own screen is (see "Using ARTS
+output at batch scale" above: flagged genes are ordinary housekeeping gene families, not
+resistance genes by name, with `TIGR00710`/`efflux_Bcr_CflA` called out as the one partial
+exception).
+
+**Across all 438 completed genomes, only 1 of the 347 distinct genes ARTS ever flags anywhere in
+this batch carries any resistance-related annotation at all: `TIGR00710`/`efflux_Bcr_CflA`.**
+Confirmed by scanning every flagged gene's TIGRFAM name/description/category (both phylum
+reference sets) for resistance-plausible keywords (`resist`, `efflux`, `multidrug`, `beta-lactam`,
+`RND`, `MFS`, `ABC transporter`, etc.) — the only other two keyword matches were false positives
+(`TIGR01388`/`rnd` is ribonuclease D, not an RND efflux pump; `TIGR02314`/`ABC_MetN` is a
+D-methionine *importer*, not a drug-efflux ABC transporter). Everything else ARTS flags —
+including its single most frequent hit, `TIGR01534`/GAPDH-I, present in 376/438 genomes — is an
+essential housekeeping gene (energy metabolism, ribosomal proteins, ATP synthase subunits, DNA
+replication/repair, protein export machinery) with no resistance function by name or annotation.
+This isn't a bug: ARTS's core-gene screen is doing what it's designed to do (surface genes under
+duplication/proximity/phylogeny pressure near a BGC), which is a different question from "does
+this gene confer antibiotic resistance" — in this batch, those two questions barely overlap.
+
+`TIGR00710` itself needed care to cross-check correctly, because of a naming trap: searching
+funcscan's combined report for the literal strings `"bcr"`/`"cfla"` finds only a single tool
+(DeepARG's low-confidence "potential ARG" pass) hitting a locus it names
+`BICYCLOMYCIN-MULTIDRUG_EFFLUX_PROTEIN_BCR` — weak, single-tool evidence. The real, strongly
+corroborated hit at this kind of locus is a *differently-named* gene, `tet(35)` ("tetracycline
+efflux Na+/H+ antiporter family transporter Tet(35)", itself a known Bcr/CflA-family MFS
+transporter), which AMRFinderPlus, RGI, and ABRicate call independently in near-perfect 3-way
+agreement at the exact same genomic coordinates — confirmed by comparing the DeepARG locus and the
+`tet(35)` locus's genomic start/stop coordinates directly, since they turned out to be two
+different loci in the same genome, not two names for the same hit. **Don't grep by gene name
+across ARG-caller output — different tools name the same gene family differently (also seen
+earlier with `AcrB`/`TolC`/`MdtK` all being names for related efflux-pump components); join by
+genomic locus instead.**
+
+`lsf/argcheck_crosscheck.py` builds this comparison correctly: it pulls `tet(35)` calls from the
+*current, complete* hamronization report for each collection (`vibrio_seq`'s
+`funcscan_results_merged`, not the stale, 160-strains-short `funcscan_results`; and
+`pseudoalteromonas_seq`'s own `funcscan_results`), applies the same `COLLECTION_PREFERENCE`
+dedup as `build_phylum_samplesheet.py` for the 6 strains present in both collections (so the ARG
+evidence and the ARTS result being compared always come from the same physical assembly), and
+joins the result against `triage_report.tsv`'s ranking. Output:
+`/work3/josne/Projects/Vibrio_Galathea3/arts_results/tet35_argcheck_crosscheck.tsv`.
+
+Result on the full batch: 59 strains have a `tet(35)` call from at least one tool, 58/59 with full
+3-tool agreement (AMRFinderPlus + RGI + ABRicate) — a strong, well-corroborated candidate. Ranked
+against ARTS's own `2+`/`3+` composite score (438 genomes total), these strains' best rank is
+**57th**, worst is 379th, mean ~255th. **Even ARTS's one plausibly resistance-annotated recurring
+candidate, backed by 3-tool-independent AMR confirmation, does not cluster near the top of ARTS's
+own ranking.** Practical takeaway: don't use the `2+`/`3+` score alone to prioritize strains for
+resistance-gene follow-up — cross-reference candidate genes against an AMR-specific caller
+(funcscan or similar) before treating a high ARTS rank as evidence of a strong resistance
+candidate.
+
 ## Known unfixed issue (not hit by this fork's usage, documented for awareness)
 
 `combine_results.py`'s `generate_plots()` is called *unguarded* by `artspipeline1.py`'s native
