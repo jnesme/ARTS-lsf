@@ -555,13 +555,33 @@ reductase, DNA topoisomerase III, a T6SS component, etc. — genuinely independe
 none resistance-annotated), while the raw-count top strain (`S0575`) drops to rank 46 once its
 flagellar operon is collapsed to the one cluster it actually is.
 
-**Practical takeaway: prioritize by distinct clusters, not raw gene count**, and treat a strain's
-`has_resistance_annotated_gene` flag and its cluster-diversity score as two separate pieces of
-evidence to combine deliberately — most of the raw-count top-10 score high on gene count alone
-with a single operon behind most of it, while the batch's actual best strains by both measures at
-once are different names: `S2539_3` and `S4053` each carry `TIGR00710` *and* 7 distinct flagged
-clusters (vs. the batch max of 8, held by `S1609`, which has no resistance-annotated gene) — a
-substantially more convincing combination than anything in the raw-count top-10.
+**Practical takeaway: prioritize by distinct clusters, not raw gene count** — but also check
+`coretable.tsv`'s `BGC_Proximity` column for the specific resistance-annotated gene before treating
+`has_resistance_annotated_gene` and cluster-diversity as *combined* evidence for one candidate
+region, because they aren't always spatially connected. `S2539_3` and `S4053` both flag
+`TIGR00710` and both have 7 distinct flagged clusters (vs. the batch max of 8, `S1609`, which has
+no resistance-annotated gene) — but only in `S2539_3` is `TIGR00710` actually `BGC_Proximity=Yes`
+(sitting in a RiPP-like cluster, `cluster-27_1`). In `S4053`, `TIGR00710` is `Duplication=Yes`/
+`Phylogeny=Yes` but `BGC_Proximity=No` — 4 duplicated copies scattered across 4 different contigs,
+none adjacent to any of its 7 flagged BGCs. So in `S4053` specifically, the resistance-gene signal
+and the cluster-diversity signal are about *different, unconnected* parts of the genome; `S2539_3`
+is the one where they reinforce each other. Don't assume a strain's flags combine into one story
+without checking `BGC_Proximity` per gene.
+
+**External validation:** `S4053` was independently confirmed bioactive against *Klebsiella* in
+the lab (2026-09-10) — a real, wet-lab-positive hit from this batch, regardless of which specific
+ARTS-flagged signal (if any) explains it. Given the `TIGR00710` disconnect just described, the
+`TIGR00710` hit is *not* good evidence for which BGC in `S4053` produces the active compound. Its
+7 flagged clusters are: `NRP-metallophore,NRPS,T1PKS` (`cluster-1_1`) immediately adjacent to
+`NI-siderophore,ectoine` (`cluster-1_2`) on the same scaffold (412–508 kb, effectively one
+~95 kb locus — antiSMASH's cluster splitting can separate what is really one larger BGC),
+`T3PKS` (`cluster-2_1`), `azole-containing-RiPP` (`cluster-2_3`), `NRPS-like,arylpolyene`
+(`cluster-6_2`), `NRPS,T1PKS` (`cluster-6_3`), and `betalactone` (`cluster-10_1`, the one with the
+most core hits, 5). The adjacent siderophore/NRPS-T1PKS pair is the mechanistically most
+plausible candidate for anti-*Klebsiella* activity (siderophore-antibiotic "Trojan horse"
+conjugates are a well-documented strategy against Enterobacteriaceae, which take up iron
+aggressively) — but this is a hypothesis from BGC architecture alone, not something ARTS's core-
+gene screen itself singles out; it needs actual structural/knockout follow-up to confirm.
 
 ### Cross-checking ARTS's candidates against independent ARG calls (funcscan)
 
